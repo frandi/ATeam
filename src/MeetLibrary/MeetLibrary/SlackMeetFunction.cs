@@ -7,9 +7,7 @@ using Microsoft.Azure.WebJobs.Extensions.Http;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using System;
-using System.IO;
 using System.Linq;
-using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -54,7 +52,8 @@ namespace MeetLibrary
             }
 
             bool isDirectMessage = channelName.ToString().Equals("directmessage", StringComparison.InvariantCultureIgnoreCase);
-            if (string.IsNullOrEmpty(meetItem.Alias) && !isDirectMessage)
+            bool isPrivateChannel = channelName.ToString().Equals("privategroup", StringComparison.InvariantCultureIgnoreCase);
+            if (string.IsNullOrEmpty(meetItem.Alias) && !isDirectMessage && !isPrivateChannel)
                 meetItem.Alias = channelName;
 
             if (string.IsNullOrEmpty(meetItem.Alias))
@@ -152,19 +151,21 @@ namespace MeetLibrary
         private static string GetHelpText()
         {
             var sb = new StringBuilder();
-            sb.AppendLine("\"/meet\" is a simple command to get or set a meeting room which associates with certain channel or an alias.");
+            sb.AppendLine("*Description*");
+            sb.AppendLine("`/meet` is a simple command to get or set a meeting room which associates to certain channel or an alias.");
             sb.AppendLine("");
-            sb.AppendLine("GET Usage:");
-            sb.AppendLine("  - /meet              : display meeting room for current channel");
-            sb.AppendLine("  - /meet [room-alias] : display meeting room for the mentioned alias");
+            sb.AppendLine("*GET Usage*");
+            sb.AppendLine("  - `/meet`              : display meeting room for current *public* channel");
+            sb.AppendLine("  - `/meet [room-alias]` : display meeting room by the alias. The alias could be the channel name.");
             sb.AppendLine("");
-            sb.AppendLine("SET Usage:");
-            sb.AppendLine("  - /meet [room-code]  : set meeting room for current channel");
-            sb.AppendLine("  - /meet [room-code] [room-alias] : set meeting room with an alias");
-            sb.AppendLine("Note: If the meeting room for the channel or the alias exist, you need to add \"force\" parameter in the end of the command to update the value.");
+            sb.AppendLine("*SET Usage*");
+            sb.AppendLine("  - `/meet [room-code]`  : set meeting room for current *public* channel");
+            sb.AppendLine("  - `/meet [room-code] [room-alias]` : set meeting room with an alias. The alias could be the channel name.");
             sb.AppendLine("");
-            sb.AppendLine("HELP Usage:");
-            sb.AppendLine("  - /meet help         : display help");
+            sb.AppendLine("*Note*: If the meeting room for the channel/alias exist, you need to add `force` parameter in the end of the command to update the value.");
+            sb.AppendLine("");
+            sb.AppendLine("*HELP Usage*");
+            sb.AppendLine("  - `/meet help`         : display help");
 
             return sb.ToString();
 
