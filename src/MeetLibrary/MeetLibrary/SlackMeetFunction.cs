@@ -5,8 +5,12 @@ using Microsoft.Azure.Documents.Linq;
 using Microsoft.Azure.WebJobs;
 using Microsoft.Azure.WebJobs.Extensions.Http;
 using Microsoft.Extensions.Logging;
+using Newtonsoft.Json;
 using System;
+using System.IO;
 using System.Linq;
+using System.Net.Http;
+using System.Text;
 using System.Threading.Tasks;
 
 namespace MeetLibrary
@@ -24,28 +28,42 @@ namespace MeetLibrary
         {
             log.LogInformation("Parsing Slack command.");
 
+            var data = await new Microsoft.AspNetCore.WebUtilities.FormReader(req.Body).ReadFormAsync();
+
+            log.LogInformation($"Request Body: {JsonConvert.SerializeObject(data)}");
+
             string baseUrl = Environment.GetEnvironmentVariable("BaseMeetUrl");
             if (string.IsNullOrEmpty(baseUrl))
                 baseUrl = "https://meet.google.com";
 
-            string teamDomain = req.Query["team_domain"];
-            string channelName = req.Query["channel_name"];
-            string userName = req.Query["user_name"];
-            string command = req.Query["command"];
-            string text = req.Query["text"];
-            string responseUrl = req.Query["response_url"];
+            data.TryGetValue("team_domain", out var teamDomain);
+            data.TryGetValue("channel_id", out var channelId);
+            data.TryGetValue("channel_name", out var channelName);
+            data.TryGetValue("user_name", out var userName);
+            data.TryGetValue("command", out var command);
+            data.TryGetValue("text", out var text);
+            data.TryGetValue("response_url", out var responseUrl);
 
             var meetItem = ParseCommandText(text);
-            if (string.IsNullOrEmpty(meetItem.Alias))
+
+            if (meetItem.IsHelpOperation) // helper
+            {
+                var helpText = GetHelpText();
+
+                return BlockMessageResult(channelId, helpText);
+            }
+
+            bool isDirectMessage = channelName.ToString().Equals("directmessage", StringComparison.InvariantCultureIgnoreCase);
+            if (string.IsNullOrEmpty(meetItem.Alias) && !isDirectMessage)
                 meetItem.Alias = channelName;
 
             if (string.IsNullOrEmpty(meetItem.Alias))
-                return new BadRequestObjectResult("Alias parameter is required.");
+                return BlockMessageResult(channelId, "*Failed*. You need to include `room-alias` as parameter in the command.");
 
             // get item based on the alias
             Uri collectionUri = UriFactory.CreateDocumentCollectionUri("MeetLibrary", "Items");
             var query = client.CreateDocumentQuery<MeetLibraryItem>(collectionUri)
-                .Where(p => p.id == meetItem.Alias && p.partitionKey == teamDomain)
+                .Where(p => p.id == meetItem.Alias && p.partitionKey == teamDomain.ToString())
                 .AsDocumentQuery();
             var items = await query.ExecuteNextAsync<MeetLibraryItem>();
             var meetLibraryItem = items.FirstOrDefault();
@@ -53,12 +71,15 @@ namespace MeetLibrary
             if (meetItem.IsSetOperation) // setter
             {
                 if (string.IsNullOrEmpty(meetItem.Code))
-                    return new BadRequestObjectResult("Code parameter is required");
+                    return BlockMessageResult(channelId, "*Failed*. You need to include `room-code` as parameter in the command.");
 
                 if (meetLibraryItem != null) // exists
                 {
+                    if (meetLibraryItem.Code.Equals(meetItem.Code, StringComparison.InvariantCultureIgnoreCase))
+                        return BlockMessageResult(channelId, $"Well, `{meetItem.Code}` has been configured as the meeting room for `{meetItem.Alias}` before. But, thanks for your effort!");
+
                     if (!meetItem.IsForceUpdate)
-                        return new BadRequestObjectResult($"The alias \"{meetItem.Alias}\" exists. Please include \"force\" parameter if you want to replace the code.");
+                        return BlockMessageResult(channelId, $"Oops, the meeting room for `{meetItem.Alias}` has been configured before. If you want to update it, please include `force` parameter in the end of the command.");
 
                     meetLibraryItem.Code = meetItem.Code;
 
@@ -80,14 +101,14 @@ namespace MeetLibrary
                     log.LogInformation($"A new code \"{meetItem.Code}\" has been added with alias \"{meetItem.Alias}\"");
                 }
 
-                return new OkObjectResult($"The code \"{meetItem.Code}\" has been saved for alias \"{meetItem.Alias}\"");
+                return BlockMessageResult(channelId, true, $"@{userName} has updated the meeting room for `{meetItem.Alias}` to {baseUrl}/{meetItem.Code}.");
             } 
             else // getter
             {
                 if (meetLibraryItem == null)
-                    return new NotFoundObjectResult($"The alias \"{meetItem.Alias}\" was not found.");
+                    return BlockMessageResult(channelId, $"Sorry, no meeting room was configured for `{meetItem.Alias}` yet.");
 
-                return new OkObjectResult($"{baseUrl}/{meetLibraryItem.Code}");
+                return BlockMessageResult(channelId, true, $"Meeting room for `{meetItem.Alias}` is {baseUrl}/{meetLibraryItem.Code}");
             }
         }
 
@@ -107,6 +128,8 @@ namespace MeetLibrary
                     case 0:
                         if (partsWithoutForce[i].Equals("set", StringComparison.InvariantCultureIgnoreCase))
                             item.IsSetOperation = true;
+                        else if (partsWithoutForce[i].Equals("help", StringComparison.InvariantCultureIgnoreCase))
+                            item.IsHelpOperation = true;
                         else
                             item.Alias = partsWithoutForce[i];
                         break;
@@ -124,6 +147,45 @@ namespace MeetLibrary
             }
 
             return item;
+        }
+
+        private static string GetHelpText()
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("\"/meet\" is a simple command to get or set a meeting room which associates with certain channel or an alias.");
+            sb.AppendLine("");
+            sb.AppendLine("GET Usage:");
+            sb.AppendLine("  - /meet              : display meeting room for current channel");
+            sb.AppendLine("  - /meet [room-alias] : display meeting room for the mentioned alias");
+            sb.AppendLine("");
+            sb.AppendLine("SET Usage:");
+            sb.AppendLine("  - /meet [room-code]  : set meeting room for current channel");
+            sb.AppendLine("  - /meet [room-code] [room-alias] : set meeting room with an alias");
+            sb.AppendLine("Note: If the meeting room for the channel or the alias exist, you need to add \"force\" parameter in the end of the command to update the value.");
+            sb.AppendLine("");
+            sb.AppendLine("HELP Usage:");
+            sb.AppendLine("  - /meet help         : display help");
+
+            return sb.ToString();
+
+        }
+
+        private static JsonResult BlockMessageResult(string channelId, bool inChannel, string markdownText, params string[] additionalMdTexts)
+        {
+            var payload = new MessagePayload(channelId, inChannel);
+            payload.AddSection(markdownText);
+
+            foreach (var mdText in additionalMdTexts)
+            {
+                payload.AddSection(mdText);
+            }
+
+            return new JsonResult(payload);
+        }
+
+        private static JsonResult BlockMessageResult(string channelId, string markdownText, params string[] additionalMdTexts)
+        {
+            return BlockMessageResult(channelId, false, markdownText, additionalMdTexts);
         }
     }
 }

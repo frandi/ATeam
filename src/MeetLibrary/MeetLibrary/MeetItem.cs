@@ -8,6 +8,7 @@ namespace MeetLibrary
     {
         public string Alias { get; set; }
         public string Code { get; set; }
+        public bool IsHelpOperation { get; set; }
         public bool IsSetOperation { get; set; }
         public bool IsForceUpdate { get; set; }
 
