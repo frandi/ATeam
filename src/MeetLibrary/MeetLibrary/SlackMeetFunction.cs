@@ -159,8 +159,8 @@ namespace MeetLibrary
             sb.AppendLine("  - `/meet [room-alias]` : display meeting room by the alias. The alias could be the channel name.");
             sb.AppendLine("");
             sb.AppendLine("*SET Usage*");
-            sb.AppendLine("  - `/meet [room-code]`  : set meeting room for current *public* channel");
-            sb.AppendLine("  - `/meet [room-code] [room-alias]` : set meeting room with an alias. The alias could be the channel name.");
+            sb.AppendLine("  - `/meet set [room-code]`  : set meeting room for current *public* channel");
+            sb.AppendLine("  - `/meet set [room-code] [room-alias]` : set meeting room with an alias. The alias could be the channel name.");
             sb.AppendLine("");
             sb.AppendLine("*Note*: If the meeting room for the channel/alias exist, you need to add `force` parameter in the end of the command to update the value.");
             sb.AppendLine("");
